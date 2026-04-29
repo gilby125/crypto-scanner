@@ -17,6 +17,8 @@ var (
 	fileExtensions   string
 	maxDepth         int
 	quiet            bool
+	scanAllFiles     bool
+	binaryMode       bool
 )
 
 func main() {
@@ -38,6 +40,8 @@ It can detect:
 	root.PersistentFlags().StringVarP(&fileExtensions, "extensions", "x", ".txt,.log,.json,.csv,.key,.wallet,.dat,.db,.sqlite", "Comma-separated file extensions to scan")
 	root.PersistentFlags().IntVarP(&maxDepth, "depth", "d", 10, "Maximum directory depth to scan")
 	root.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Suppress detailed output, show only findings")
+	root.PersistentFlags().BoolVarP(&scanAllFiles, "all", "a", false, "Scan all files regardless of extension")
+	root.PersistentFlags().BoolVarP(&binaryMode, "binary", "b", false, "Scan files in binary mode (useful for corrupted/unknown files)")
 
 	// Scan command
 	var scanCmd = &cobra.Command{
@@ -47,6 +51,21 @@ It can detect:
 		Run:   scanPath,
 	}
 	root.AddCommand(scanCmd)
+
+	// Scan block device command (for unknown filesystems)
+	var scanBlockCmd = &cobra.Command{
+		Use:   "scan-block [device]",
+		Short: "Scan raw block device for crypto keys (unknown filesystems)",
+		Long: `Scan raw block devices, disk images, or files without mounted filesystems.
+This is useful for scanning external drives with unknown or corrupted filesystems.
+
+Examples:
+  crypto-scanner scan-block /dev/sdb        # Scan USB drive directly
+  crypto-scanner scan-block disk.img         # Scan disk image file`,
+		Args: cobra.ExactArgs(1),
+		Run:  scanBlockDevice,
+	}
+	root.AddCommand(scanBlockCmd)
 
 	// Guess command for generating potential keys
 	var guessCmd = &cobra.Command{
@@ -102,14 +121,23 @@ func scanPath(cmd *cobra.Command, args []string) {
 				}
 				return nil
 			}
-			if shouldScanFile(p, extensions) {
-				keys := scanFile(p)
+			if scanAllFiles || binaryMode || shouldScanFile(p, extensions) {
+				var keys []scanner.DetectedKey
+				if binaryMode {
+					keys = scanFileBinary(p)
+				} else {
+					keys = scanFile(p)
+				}
 				findings = append(findings, keys...)
 			}
 			return nil
 		})
 	} else {
-		findings = scanFile(absPath)
+		if binaryMode {
+			findings = scanFileBinary(absPath)
+		} else {
+			findings = scanFile(absPath)
+		}
 	}
 
 	if len(findings) > 0 {
@@ -174,6 +202,16 @@ func scanFile(path string) []scanner.DetectedKey {
 	return findings
 }
 
+// scanFileBinary scans a file in binary mode for keys
+func scanFileBinary(path string) []scanner.DetectedKey {
+	bs := scanner.NewBlockScanner(4096, entropyThreshold)
+	findings, err := bs.ScanRawFile(path)
+	if err != nil {
+		return nil
+	}
+	return findings
+}
+
 func shouldScanFile(path string, extensions map[string]bool) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return extensions[ext]
@@ -228,6 +266,48 @@ func guessKeys(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Println("\n💡 Tip: Use 'scan' command to search for actual keys on drives.")
+}
+
+func scanBlockDevice(cmd *cobra.Command, args []string) {
+	path := args[0]
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving path: %v\n", err)
+		os.Exit(1)
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error accessing path: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("🔍 Scanning raw block device: %s\n", absPath)
+	fmt.Println(strings.Repeat("=", 60))
+
+	bs := scanner.NewBlockScanner(0, entropyThreshold)
+	findings, err := bs.ScanBlockDevice(absPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error scanning block device: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(findings) > 0 {
+		fmt.Println("\n🔑 FINDINGS:")
+		fmt.Println(strings.Repeat("-", 60))
+		for _, key := range findings {
+			fmt.Printf("  [%s] %s\n", key.Type, key.Description)
+			if key.Value != "" {
+				fmt.Printf("    Value: %s\n", maskValue(key.Value))
+			}
+			fmt.Printf("    Location: %s\n\n", key.Path)
+		}
+	} else {
+		fmt.Println("\nNo crypto keys or seed phrases found.")
+	}
+
+	_ = info // Avoid unused variable warning
 }
 
 // scanReader scans a reader for crypto keys

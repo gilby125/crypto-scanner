@@ -45,7 +45,49 @@ go run . [command] [options]
 ./crypto-scanner scan /path/to/file.txt
 ```
 
+### Scan Raw Block Devices (Unknown Filesystems)
+
+Scan drives with unknown, corrupted, or unmounted filesystems:
+
+```bash
+# Scan a raw block device (USB drive on Linux)
+sudo ./crypto-scanner scan-block /dev/sdb
+
+# Scan a disk image file
+./crypto-scanner scan-block disk.img
+```
+
+This mode reads the drive byte-by-byte, bypassing the filesystem entirely. Useful for:
+- Drives with corrupted filesystems
+- Drives with unknown filesystem types
+- Forensic recovery of deleted data
+- Scanning without mounting the drive
+
+### Binary Mode Scanning
+
+Scan files in binary mode (finds keys in non-text files like databases):
+
+```bash
+./crypto-scanner scan --binary /path/to/file.db
+```
+
+### Scan All Files (Ignore Extensions)
+
+```bash
+./crypto-scanner scan --all /path/to/scan
+```
+
+### Key Generator
+
+Generate sample key patterns:
+
+```bash
+./crypto-scanner guess
+```
+
 ### Command Line Options
+
+#### Global Flags
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -53,6 +95,8 @@ go run . [command] [options]
 | `--extensions` | `-x` | .txt,.log,.json,.csv,.key,.wallet,.dat,.db,.sqlite | Comma-separated file extensions to scan |
 | `--depth` | `-d` | 10 | Maximum directory depth to scan |
 | `--quiet` | `-q` | false | Suppress detailed output, show only findings |
+| `--all` | `-a` | false | Scan all files regardless of extension |
+| `--binary` | `-b` | false | Scan files in binary mode |
 
 ### Examples
 
@@ -68,6 +112,12 @@ go run . [command] [options]
 
 # Scan with unlimited depth (be careful!)
 ./crypto-scanner scan --depth 0 /path/to/scan
+
+# Scan raw block device (bypass filesystem)
+sudo ./crypto-scanner scan-block /dev/sdb
+
+# Scan binary file (database, wallet file, etc.)
+./crypto-scanner scan --binary --all wallet.dat
 ```
 
 ## Key Detection
